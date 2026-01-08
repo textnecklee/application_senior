@@ -113,9 +113,8 @@ class FocusDetector:
         eyes_open = avg_ear_value > self.ear_threshold  # 눈이 떠져 있음
         looking_forward = head_offset < 0.08  # 정면을 보고 있음
         
-        # 디버그 출력
-        print(f"EAR: {avg_ear_value:.3f} (눈{'열림' if eyes_open else '감김'}), "
-              f"Head: {head_offset:.3f} ({'정면' if looking_forward else '측면'})")
+        # 디버그 출력 (너무 빈번하면 주석 처리 가능)
+        # print(f"EAR: {avg_ear_value:.3f}, Head: {head_offset:.3f}")
         
         is_focused = eyes_open and looking_forward
         
@@ -187,6 +186,17 @@ class CameraClient:
         
         try:
             await self.websocket.send(json.dumps(message))
+            
+            # [수정됨] 서버가 처리를 완료하고 응답할 때까지 대기 (최대 2초)
+            try:
+                print("서버 응답 대기 중...")
+                response = await asyncio.wait_for(self.websocket.recv(), timeout=2.0)
+                print(f"서버 응답 수신 완료")
+            except asyncio.TimeoutError:
+                print("서버 응답 시간 초과 (종료 진행)")
+            except Exception as e:
+                print(f"응답 수신 중 오류 (무시됨): {e}")
+
             self.session_started = False
             print("학습 세션이 종료되었습니다.")
         except Exception as e:

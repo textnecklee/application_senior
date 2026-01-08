@@ -67,7 +67,8 @@ class ConnectionManager:
     
     def _finalize_session(self, websocket: WebSocket, session_info: Dict):
         """세션 종료 및 데이터 저장"""
-        if not session_info["session_start_datetime"]:
+        # 세션이 시작되지 않았거나 이미 저장된 경우 리턴 (중복 저장 방지)
+        if not session_info.get("session_start_datetime"):
             return
         
         end_datetime = datetime.now()
@@ -95,7 +96,10 @@ class ConnectionManager:
             if total_time > 0:
                 print(f"  집중 시간: {focused_time:.2f}초 ({focused_time/total_time*100:.1f}%)")
                 print(f"  비집중 시간: {unfocused_time:.2f}초 ({unfocused_time/total_time*100:.1f}%)")
+            
+            # [수정됨] 저장 후 시작 시간을 None으로 설정하여 중복 처리 방지
             session_info["session_start_datetime"] = None
+            
         except Exception as e:
             print(f"세션 데이터 저장 실패: {e}")
     
@@ -142,7 +146,6 @@ class ConnectionManager:
         
         elif msg_type == "session_end":
             # 세션 종료
-            # 마지막 duration이 있으면 처리
             duration = message.get("duration", 0.0)
             if duration > 0:
                 if session_info["last_status"]:
@@ -173,7 +176,6 @@ class ConnectionManager:
             print(f"✓ 세션 종료 응답 전송: 사용자 {session_info['user_id']}")
         
         elif msg_type == "ping":
-            # 핑 응답
             response = {
                 "type": "pong",
                 "timestamp": time.time()
