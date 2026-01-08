@@ -65,11 +65,19 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             message = json.loads(data)
             await manager.handle_message(websocket, message)
+            
+            # [추가됨] 메시지 처리 중 연결이 끊겼다면 루프 종료
+            if websocket not in manager.active_connections:
+                break
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
         print(f"WebSocket 오류: {e}")
-        manager.disconnect(websocket)
+        # 이미 연결이 해제된 상태일 수 있으므로 안전하게 처리
+        if websocket in manager.active_connections:
+            manager.disconnect(websocket)
+
 
 
 if __name__ == "__main__":

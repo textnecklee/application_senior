@@ -95,6 +95,7 @@ class ConnectionManager:
             if total_time > 0:
                 print(f"  집중 시간: {focused_time:.2f}초 ({focused_time/total_time*100:.1f}%)")
                 print(f"  비집중 시간: {unfocused_time:.2f}초 ({unfocused_time/total_time*100:.1f}%)")
+            session_info["session_start_datetime"] = None
         except Exception as e:
             print(f"세션 데이터 저장 실패: {e}")
     
