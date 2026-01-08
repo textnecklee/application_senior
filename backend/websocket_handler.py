@@ -16,7 +16,7 @@ class ConnectionManager:
     
     def __init__(self):
         self.active_connections: List[WebSocket] = []
-        self.client_sessions: Dict[WebSocket, Dict] = {}  # 각 연결의 세션 정보
+        self.client_sessions: Dict[WebSocket, Dict] = {}
     
     async def connect(self, websocket: WebSocket):
         """클라이언트 연결"""
@@ -24,11 +24,10 @@ class ConnectionManager:
         self.active_connections.append(websocket)
         self.client_sessions[websocket] = {
             "user_id": None,
-            "session_start_time": None,
+            "session_start_datetime": None,
             "focused_time": 0.0,
             "unfocused_time": 0.0,
-            "last_status": True,
-            "last_status_time": None
+            "last_status": True
         }
         print(f"클라이언트 연결됨. 총 연결 수: {len(self.active_connections)}")
     
@@ -37,10 +36,9 @@ class ConnectionManager:
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
         
-        # 세션 종료 처리
         if websocket in self.client_sessions:
             session_info = self.client_sessions[websocket]
-            if session_info["session_start_time"]:
+            if session_info["session_start_datetime"]:
                 self._finalize_session(websocket, session_info)
             del self.client_sessions[websocket]
         
@@ -67,45 +65,36 @@ class ConnectionManager:
         for conn in disconnected:
             self.disconnect(conn)
     
-    def _update_time_tracking(self, session_info: Dict, is_focused: bool, current_time: float):
-        """시간 추적 업데이트"""
-        if not session_info["session_start_time"]:
-            return
-        
-        if session_info["last_status_time"]:
-            elapsed = current_time - session_info["last_status_time"]
-            if session_info["last_status"]:
-                session_info["focused_time"] += elapsed
-            else:
-                session_info["unfocused_time"] += elapsed
-        
-        session_info["last_status"] = is_focused
-        session_info["last_status_time"] = current_time
-    
     def _finalize_session(self, websocket: WebSocket, session_info: Dict):
         """세션 종료 및 데이터 저장"""
-        if not session_info["session_start_time"]:
+        if not session_info["session_start_datetime"]:
             return
         
-        current_time = time.time()
-        # 마지막 시간 구간 업데이트
-        self._update_time_tracking(session_info, session_info["last_status"], current_time)
+        end_datetime = datetime.now()
+        start_datetime = session_info["session_start_datetime"]
         
-        total_time = current_time - session_info["session_start_time"]
+        # 0.01초 분해능으로 반올림
+        focused_time = round(session_info["focused_time"], 2)
+        unfocused_time = round(session_info["unfocused_time"], 2)
+        total_time = round(focused_time + unfocused_time, 2)
         
         session_data = {
             "user_id": session_info["user_id"],
-            "start_time": datetime.fromtimestamp(session_info["session_start_time"]),
-            "end_time": datetime.fromtimestamp(current_time),
+            "start_time": start_datetime,
+            "end_time": end_datetime,
             "total_time": total_time,
-            "focused_time": session_info["focused_time"],
-            "unfocused_time": session_info["unfocused_time"]
+            "focused_time": focused_time,
+            "unfocused_time": unfocused_time
         }
         
-        # Firebase에 저장
         try:
             save_study_session(session_data)
-            print(f"세션 데이터 저장 완료: {session_data}")
+            print(f"\n세션 데이터 저장 완료:")
+            print(f"  사용자: {session_info['user_id']}")
+            print(f"  총 시간: {total_time:.2f}초")
+            if total_time > 0:
+                print(f"  집중 시간: {focused_time:.2f}초 ({focused_time/total_time*100:.1f}%)")
+                print(f"  비집중 시간: {unfocused_time:.2f}초 ({unfocused_time/total_time*100:.1f}%)")
         except Exception as e:
             print(f"세션 데이터 저장 실패: {e}")
     
@@ -120,11 +109,10 @@ class ConnectionManager:
         if msg_type == "session_start":
             # 세션 시작
             session_info["user_id"] = message.get("user_id")
-            session_info["session_start_time"] = time.time()
+            session_info["session_start_datetime"] = datetime.now()
             session_info["focused_time"] = 0.0
             session_info["unfocused_time"] = 0.0
             session_info["last_status"] = True
-            session_info["last_status_time"] = time.time()
             
             response = {
                 "type": "session_started",
@@ -137,28 +125,44 @@ class ConnectionManager:
         elif msg_type == "status_update":
             # 집중 상태 업데이트
             is_focused = message.get("is_focused", True)
-            current_time = message.get("timestamp", time.time())
+            duration = message.get("duration", 0.0)  # 클라이언트가 보낸 지속 시간
             
-            self._update_time_tracking(session_info, is_focused, current_time)
+            if duration > 0:
+                # 클라이언트가 계산한 지속 시간 사용
+                if session_info["last_status"]:
+                    session_info["focused_time"] += duration
+                    print(f"✓ 집중 +{duration:.2f}초 (총 집중: {session_info['focused_time']:.2f}초)")
+                else:
+                    session_info["unfocused_time"] += duration
+                    print(f"✗ 비집중 +{duration:.2f}초 (총 비집중: {session_info['unfocused_time']:.2f}초)")
+            
+            # 현재 상태로 업데이트
+            session_info["last_status"] = is_focused
         
         elif msg_type == "session_end":
             # 세션 종료
-            session_data = message.get("session_data", {})
-            
-            # 세션 정보 업데이트
-            if session_data:
-                session_info["focused_time"] = session_data.get("focused_time", session_info["focused_time"])
-                session_info["unfocused_time"] = session_data.get("unfocused_time", session_info["unfocused_time"])
+            # 마지막 duration이 있으면 처리
+            duration = message.get("duration", 0.0)
+            if duration > 0:
+                if session_info["last_status"]:
+                    session_info["focused_time"] += duration
+                else:
+                    session_info["unfocused_time"] += duration
             
             self._finalize_session(websocket, session_info)
+            
+            # 0.01초 분해능으로 반올림
+            focused_time = round(session_info["focused_time"], 2)
+            unfocused_time = round(session_info["unfocused_time"], 2)
+            total_time = round(focused_time + unfocused_time, 2)
             
             response = {
                 "type": "session_ended",
                 "message": "세션이 종료되었습니다.",
                 "session_data": {
-                    "total_time": session_data.get("total_time", 0),
-                    "focused_time": session_info["focused_time"],
-                    "unfocused_time": session_info["unfocused_time"]
+                    "total_time": total_time,
+                    "focused_time": focused_time,
+                    "unfocused_time": unfocused_time
                 },
                 "timestamp": time.time()
             }
@@ -172,4 +176,3 @@ class ConnectionManager:
                 "timestamp": time.time()
             }
             await self.send_personal_message(json.dumps(response), websocket)
-
