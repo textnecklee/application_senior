@@ -146,8 +146,10 @@ class ConnectionManager:
             if duration > 0:
                 if session_info["last_status"]:
                     session_info["focused_time"] += duration
+                    print(f"✓ 집중 (마지막) +{duration:.2f}초 (총 집중: {session_info['focused_time']:.2f}초)")
                 else:
                     session_info["unfocused_time"] += duration
+                    print(f"✗ 비집중 (마지막) +{duration:.2f}초 (총 비집중: {session_info['unfocused_time']:.2f}초)")
             
             self._finalize_session(websocket, session_info)
             
@@ -167,7 +169,7 @@ class ConnectionManager:
                 "timestamp": time.time()
             }
             await self.send_personal_message(json.dumps(response), websocket)
-            print(f"세션 종료: 사용자 {session_info['user_id']}")
+            print(f"✓ 세션 종료 응답 전송: 사용자 {session_info['user_id']}")
         
         elif msg_type == "ping":
             # 핑 응답
